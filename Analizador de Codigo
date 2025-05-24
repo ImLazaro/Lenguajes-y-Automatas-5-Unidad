@@ -1,0 +1,655 @@
+import tkinter as tk
+from tkinter import ttk
+import re
+
+# ---------------- Lógica del Analizador ----------------
+
+instrucciones = {
+    "iniciar", "finalizar", "velocidad", "base", "cuerpo",
+    "garra", "abrirGarra", "cerrarGarra", "repetir", "Robot"
+}
+
+def analizar_lexico(codigo):
+    tabla_simbolos = []
+    esperando_metodo = False
+    patron = r'([a-zA-Z_]\w*|\d+|[=().]|.)'
+
+    for linea in codigo.splitlines():
+        tokens = re.findall(patron, linea)
+        for token in tokens:
+            if token == "Robot":
+                tipo = "Palabra_r"
+            elif token in instrucciones:
+                tipo = "Metodo"
+                esperando_metodo = False
+            elif token.isdigit():
+                tipo = "Numero"
+                esperando_metodo = False
+            elif token == '.':
+                tipo = "Operador"
+                esperando_metodo = True
+            elif token in {'=', '(', ')'}:
+                tipo = "Operador"
+                esperando_metodo = False
+            elif re.match(r'^[a-zA-Z_]\w*$', token):
+                if esperando_metodo:
+                    tipo = "Metodo_desconocido"
+                    esperando_metodo = False
+                else:
+                    tipo = "Identificador"
+            else:
+                tipo = "Desconocido"
+                esperando_metodo = False
+
+            tabla_simbolos.append((token, tipo))
+    return tabla_simbolos
+
+# ---------------- Interfaz Gráfica ----------------
+
+def ejecutar_analisis():
+    codigo = entrada_texto.get("1.0", tk.END)
+    resultado = analizar_lexico(codigo)
+    tabla.delete(*tabla.get_children())
+    for token, tipo in resultado:
+        tabla.insert("", tk.END, values=(token, tipo))
+
+def limpiar():
+    entrada_texto.delete("1.0", tk.END)
+    tabla.delete(*tabla.get_children())
+
+# Crear ventana
+ventana = tk.Tk()
+ventana.title("Analizador Léxico")
+ventana.configure(bg="#d0e6f6")  # Fondo azul pastel
+
+# Estilo de tabla
+style = ttk.Style()
+style.theme_use("default")
+style.configure("Treeview", 
+                background="#e6f2fb", 
+                fieldbackground="#e6f2fb", 
+                foreground="black",
+                rowheight=25)
+style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
+
+# Área de entrada
+tk.Label(ventana, text="Código fuente:", bg="#d0e6f6", font=("Segoe UI", 10, "bold")).pack(anchor='w', padx=10, pady=(10, 0))
+entrada_texto = tk.Text(ventana, height=10, width=60, bg="#f0f8ff", fg="black", font=("Consolas", 10))
+entrada_texto.pack(padx=10, pady=5)
+
+# Botones
+frame_botones = tk.Frame(ventana, bg="#d0e6f6")
+frame_botones.pack(pady=5)
+
+btn_analizar = tk.Button(frame_botones, text="Analizar", command=ejecutar_analisis,
+                         bg="#add8e6", fg="black", font=("Segoe UI", 10, "bold"), width=15)
+btn_analizar.pack(side="left", padx=10)
+
+btn_limpiar = tk.Button(frame_botones, text="Limpiar", command=limpiar,
+                        bg="#add8e6", fg="black", font=("Segoe UI", 10, "bold"), width=15)
+btn_limpiar.pack(side="left", padx=10)
+
+# Tabla de símbolos
+tk.Label(ventana, text="📘 Tabla de Símbolos:", bg="#d0e6f6", font=("Segoe UI", 10, "bold")).pack(anchor='w', padx=10)
+tabla = ttk.Treeview(ventana, columns=("TOKEN", "TIPO"), show='headings')
+tabla.heading("TOKEN", text="TOKEN")
+tabla.heading("TIPO", text="TIPO")
+tabla.pack(padx=10, pady=(0, 10), fill="both")
+
+ventana.mainloop()
+
+import tkinter as tk
+from tkinter import messagebox, scrolledtext, ttk
+import ply.lex as lex
+import ply.yacc as yacc
+
+# ==== Lista de tokens ====
+tokens = (
+    'ROBOT',
+    'ID',
+    'PUNTO',
+    'METODO',
+    'NUMERO',
+    'PAREN_IZQ',
+    'PAREN_DER'
+)
+
+# ==== Instrucciones válidas ====
+instrucciones = {
+    "iniciar": {"tipo": "accion", "parametros": False},
+    "finalizar": {"tipo": "accion", "parametros": False},
+    "velocidad": {"tipo": "metodo", "parametros": True},
+    "base": {"tipo": "metodo", "parametros": True},
+    "cuerpo": {"tipo": "metodo", "parametros": True},
+    "garra": {"tipo": "metodo", "parametros": True},
+    "abrirGarra": {"tipo": "metodo", "parametros": False},
+    "cerrarGarra": {"tipo": "metodo", "parametros": False},
+    "repetir": {"tipo": "metodo", "parametros": True}
+}
+
+# ==== Tabla de símbolos ====
+tabla_simbolos = []
+errores = []
+linea_actual= 1
+tokens_lexicos=[]
+# ==== Reglas del lexer ====
+t_PUNTO = r'\.'
+t_PAREN_IZQ = r'\('
+t_PAREN_DER = r'\)'
+t_ignore = ' \t'
+
+def t_ROBOT(t):
+    r'Robot'
+    return t
+
+def t_METODO(t):
+    r'iniciar|finalizar|velocidad|base|cuerpo|garra|abrirGarra|cerrarGarra|repetir'
+    return t
+
+def t_NUMERO(t):
+    r'\d+'
+    t.value = int(t.value)
+    return t
+
+def t_ID(t):
+    r'[a-zA-Z_][a-zA-Z0-9_]*'
+    return t
+
+def t_COMMENT(t):
+    r'\#.*'
+    pass  # ignorar comentarios
+
+def t_newline(t):
+    r'\n+'
+    t.lexer.lineno += len(t.value)
+
+def t_error(t):
+    errores.append(f"❌ Carácter ilegal '{t.value[0]}' en línea {t.lineno}")
+    t.lexer.skip(1)
+
+lexer = lex.lex()
+
+# Reglas de el parser sintatico
+def p_inicio(p):
+    '''inicio : instruccion
+              | instruccion inicio'''
+    pass
+
+def p_instruccion(p):
+    '''instruccion : declaracion_robot
+                  | metodo_sin_parametro
+                  | metodo_con_parametro'''
+    pass
+
+def p_declaracion_robot (p):
+    'declaracion_robot : ROBOT ID'
+    try:
+        linea = p.lineno(1)  # Línea donde aparece "Robot"
+        tabla_simbolos.extend([
+            ("Robot", "Palabra_r", "", "", linea),
+            (p[2], "identificador", "", "", linea)
+        ])
+    except Exception as e:
+        errores.append(f"Error declarando robot: {str(e)}")
+
+def p_metodo_sin_parametro(p):
+    '''metodo_sin_parametro : ID PUNTO METODO
+                             | ID PUNTO METODO PAREN_IZQ PAREN_DER'''
+    
+    metodo = p[3]
+    linea = p.lineno(1)
+    
+    if metodo not in instrucciones:
+        errores.append(f"Método desconocido '{metodo}' (línea {linea})")
+    elif instrucciones[metodo]["parametros"]:
+        errores.append(f"El método '{metodo}' requiere parámetros (línea {linea})")
+    else:
+        tabla_simbolos.append((p[1], "identificador", "", "No", linea))
+        
+        if metodo in ["iniciar", "finalizar"]:
+            if len(p) == 4:  # Sin paréntesis
+                tabla_simbolos.append((metodo, "Método", "", "No", linea))
+            else:  # Con paréntesis vacíos
+                tabla_simbolos.append((metodo, "Método", "()", "No", linea))
+        else:
+            tabla_simbolos.append((metodo, "Método", "()", "No", linea))
+            
+def p_metodo_con_parametro(p):
+    'metodo_con_parametro : ID PUNTO METODO PAREN_IZQ NUMERO PAREN_DER'
+    try:
+        linea = p.lineno(1)
+        metodo = p[3]
+        valor = p[5]
+        
+        if metodo not in instrucciones:
+            errores.append(f"Error léxico: método '{metodo}' no existe (línea {linea})")
+        elif not instrucciones[metodo]["parametros"]:
+            errores.append(f"Error sintáctico: '{metodo}' no acepta parámetros (línea {linea})")
+        else:
+            tabla_simbolos.extend([
+                (p[1], "identificador", "", "Sí", linea),
+                (metodo, "Método", str(valor), "Sí", linea)
+            ])
+    except Exception as e:
+        errores.append(f"Error interno procesando instrucción: {str(e)}")
+
+def p_error(p):
+    if p:
+        errores.append(f"❌ Error de sintaxis con el token '{p.value}' en línea {p.lineno}")
+    else:
+        errores.append("❌ Error de sintaxis: entrada incompleta o inesperada")
+
+parser = yacc.yacc()
+ 
+
+# ==== Función para analizar código ====
+def analizar_codigo():
+    global tabla_simbolos, errores, tokens_lexicos, linea_actual
+    tabla_simbolos = []
+    errores = []
+    tokens_lexicos = []
+
+    codigo = entrada_texto.get("1.0", tk.END)
+    lineas = codigo.splitlines()
+    
+    for i, linea in enumerate(lineas, start=1):
+        if linea.strip() == "":
+            continue  # Saltar líneas vacías
+        
+        lexer.lineno = i  # Asignar correctamente la línea actual
+        lexer.input(linea)
+        
+        while True:
+            tok = lexer.token()
+            if not tok:
+                break
+            tokens_lexicos.append((tok.type, tok.value, tok.lineno))
+        
+        try:
+            parser.parse(linea)
+        except Exception as e:
+            errores.append(f"❌ Error procesando la línea {i}: {str(e)}")
+
+    mostrar_resultados()
+
+# ==== Función para mostrar resultados ====
+def mostrar_resultados():
+    # Limpiar tablas
+    tree.delete(*tree.get_children())
+    tree_errores.delete(*tree_errores.get_children())
+    
+    # Insertar tokens y símbolos
+    for simbolo in tabla_simbolos:
+        tree.insert("", tk.END, values=simbolo)
+    
+    # Insertar errores
+    for err in errores:
+        if "línea" in err:
+            try:
+                # Extraer el token y la línea del mensaje
+                token = err.split("token")[-1].split("en")[0].strip().strip("'")
+                linea = err.split("línea")[-1].strip()
+                mensaje = f"❌ Error de sintaxis en '{token}' en la línea {linea}"
+                tree_errores.insert("", tk.END, values=(mensaje,))
+            except:
+                tree_errores.insert("", tk.END, values=(err,))
+        else:
+            tree_errores.insert("", tk.END, values=(err,))
+
+
+# Función para actualizar los números de línea
+def actualizar_lineas(event=None):
+    line_numbers.config(state='normal')  # Habilitar edición de los números de línea
+    line_numbers.delete('1.0', 'end')  # Limpiar los números de línea actuales
+    
+    # Obtener la cantidad de líneas en el área de texto
+    line_count = entrada_texto.index('end-1c').split('.')[0]
+    
+    # Generar los números de línea
+    line_numbers_txt = "\n".join(str(i) for i in range(1, int(line_count)+1))
+    
+    # Insertar los números de línea en el widget
+    line_numbers.insert('1.0', line_numbers_txt)
+    
+    line_numbers.config(state='disabled')  # Deshabilitar la edición de los números de línea
+
+# ==== Configuración de la interfaz ====
+ventana = tk.Tk()
+ventana.title("Analizador de Código de Robot")
+ventana.geometry("900x600")
+ventana.resizable(False, False)
+
+
+# Antes del frame_entrada, creamos frame para líneas + texto
+frame_codigo = tk.Frame(ventana)
+frame_codigo.pack(pady=10, padx=10, fill=tk.BOTH, expand=False)
+
+# Widget para números de línea
+line_numbers = tk.Text(frame_codigo, width=4, height=10, padx=3, takefocus=0, border=0,
+                       background='lightgrey', state='disabled', wrap='none')
+line_numbers.pack(side='left', fill='y')
+
+# Área de texto para código
+entrada_texto = scrolledtext.ScrolledText(frame_codigo, width=86, height=10, font=("Consolas", 12))
+entrada_texto.pack(side='right', fill='both', expand=True)
+
+# Asociar la función de actualización de los números de línea al evento de presionar Enter
+entrada_texto.bind('<KeyRelease-Return>', actualizar_lineas)
+
+# Iniciar la actualización de los números de línea cuando se cargue la ventana
+actualizar_lineas()
+
+# Función para actualizar números de línea
+def actualizar_lineas(event=None):
+    line_numbers.config(state='normal')
+    line_numbers.delete('1.0', 'end')
+    line_count = entrada_texto.index('end-1c').split('.')[0]
+    line_numbers_txt = "\n".join(str(i) for i in range(1, int(line_count)+1))
+    line_numbers.insert('1.0', line_numbers_txt)
+    line_numbers.config(state='disabled')
+entrada_texto.bind('<KeyRelease>', actualizar_lineas)
+
+actualizar_lineas()
+
+# Botón analizar
+boton_analizar = tk.Button(ventana, text="Analizar", command=analizar_codigo, font=("Arial", 12, "bold"), bg="#4CAF50", fg="white")
+boton_analizar.pack(pady=10)
+
+# Frame para tablas
+frame_tablas = tk.Frame(ventana)
+frame_tablas.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+
+
+# Tabla de símbolos (izquierda)
+frame_simbolos = tk.Frame(frame_tablas)
+frame_simbolos.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+label_simbolos = tk.Label(frame_simbolos, text="Tabla de Tokens y Símbolos", font=("Arial", 12, "bold"))
+label_simbolos.pack()
+
+# Treeview con scrollbar para símbolos
+tree_scroll = ttk.Scrollbar(frame_simbolos)
+tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+tree = ttk.Treeview(frame_simbolos, yscrollcommand=tree_scroll.set,
+                   columns=("Nombre", "Tipo", "Valor", "Parámetro"), 
+                   show='headings', height=15)
+tree.pack(fill=tk.BOTH, expand=True)
+tree_scroll.config(command=tree.yview)
+
+# Configurar columnas
+for col in ["Nombre", "Tipo", "Valor", "Parámetro"]:
+    tree.heading(col, text=col)
+    tree.column(col, width=120, anchor='center')
+
+
+# Tabla de errores (derecha)
+frame_errores = tk.Frame(frame_tablas)
+frame_errores.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+label_errores = tk.Label(frame_errores, text="Tabla de Errores", 
+                        font=("Arial", 12, "bold"), fg="red")
+label_errores.pack()
+
+
+
+# Treeview con scrollbar para errores
+error_scroll = ttk.Scrollbar(frame_errores)
+error_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+tree_errores = ttk.Treeview(frame_errores, yscrollcommand=error_scroll.set,
+                          columns=("Error",), show='headings', height=15)
+tree_errores.pack(fill=tk.BOTH, expand=True)
+
+error_scroll.config(command=tree_errores.yview)
+
+tree_errores.heading("Error", text="Error")
+tree_errores.column("Error", width=400, anchor='w')
+
+ventana.mainloop()
+
+# Fin del código
+
+
+Created by PLY version 3.11 (http://www.dabeaz.com/ply)
+
+Grammar
+
+Rule 0     S' -> inicio
+Rule 1     inicio -> instruccion
+Rule 2     inicio -> instruccion inicio
+Rule 3     instruccion -> declaracion_robot
+Rule 4     instruccion -> metodo_sin_parametro
+Rule 5     instruccion -> metodo_con_parametro
+Rule 6     declaracion_robot -> ROBOT ID
+Rule 7     metodo_sin_parametro -> ID PUNTO METODO
+Rule 8     metodo_sin_parametro -> ID PUNTO METODO PAREN_IZQ PAREN_DER
+Rule 9     metodo_con_parametro -> ID PUNTO METODO PAREN_IZQ NUMERO PAREN_DER
+
+Terminals, with rules where they appear
+
+ID                   : 6 7 8 9
+METODO               : 7 8 9
+NUMERO               : 9
+PAREN_DER            : 8 9
+PAREN_IZQ            : 8 9
+PUNTO                : 7 8 9
+ROBOT                : 6
+error                : 
+
+Nonterminals, with rules where they appear
+
+declaracion_robot    : 3
+inicio               : 2 0
+instruccion          : 1 2
+metodo_con_parametro : 5
+metodo_sin_parametro : 4
+
+Parsing method: LALR
+
+state 0
+
+    (0) S' -> . inicio
+    (1) inicio -> . instruccion
+    (2) inicio -> . instruccion inicio
+    (3) instruccion -> . declaracion_robot
+    (4) instruccion -> . metodo_sin_parametro
+    (5) instruccion -> . metodo_con_parametro
+    (6) declaracion_robot -> . ROBOT ID
+    (7) metodo_sin_parametro -> . ID PUNTO METODO
+    (8) metodo_sin_parametro -> . ID PUNTO METODO PAREN_IZQ PAREN_DER
+    (9) metodo_con_parametro -> . ID PUNTO METODO PAREN_IZQ NUMERO PAREN_DER
+
+    ROBOT           shift and go to state 6
+    ID              shift and go to state 7
+
+    inicio                         shift and go to state 1
+    instruccion                    shift and go to state 2
+    declaracion_robot              shift and go to state 3
+    metodo_sin_parametro           shift and go to state 4
+    metodo_con_parametro           shift and go to state 5
+
+state 1
+
+    (0) S' -> inicio .
+
+
+
+state 2
+
+    (1) inicio -> instruccion .
+    (2) inicio -> instruccion . inicio
+    (1) inicio -> . instruccion
+    (2) inicio -> . instruccion inicio
+    (3) instruccion -> . declaracion_robot
+    (4) instruccion -> . metodo_sin_parametro
+    (5) instruccion -> . metodo_con_parametro
+    (6) declaracion_robot -> . ROBOT ID
+    (7) metodo_sin_parametro -> . ID PUNTO METODO
+    (8) metodo_sin_parametro -> . ID PUNTO METODO PAREN_IZQ PAREN_DER
+    (9) metodo_con_parametro -> . ID PUNTO METODO PAREN_IZQ NUMERO PAREN_DER
+
+    $end            reduce using rule 1 (inicio -> instruccion .)
+    ROBOT           shift and go to state 6
+    ID              shift and go to state 7
+
+    instruccion                    shift and go to state 2
+    inicio                         shift and go to state 8
+    declaracion_robot              shift and go to state 3
+    metodo_sin_parametro           shift and go to state 4
+    metodo_con_parametro           shift and go to state 5
+
+state 3
+
+    (3) instruccion -> declaracion_robot .
+
+    ROBOT           reduce using rule 3 (instruccion -> declaracion_robot .)
+    ID              reduce using rule 3 (instruccion -> declaracion_robot .)
+    $end            reduce using rule 3 (instruccion -> declaracion_robot .)
+
+
+state 4
+
+    (4) instruccion -> metodo_sin_parametro .
+
+    ROBOT           reduce using rule 4 (instruccion -> metodo_sin_parametro .)
+    ID              reduce using rule 4 (instruccion -> metodo_sin_parametro .)
+    $end            reduce using rule 4 (instruccion -> metodo_sin_parametro .)
+
+
+state 5
+
+    (5) instruccion -> metodo_con_parametro .
+
+    ROBOT           reduce using rule 5 (instruccion -> metodo_con_parametro .)
+    ID              reduce using rule 5 (instruccion -> metodo_con_parametro .)
+    $end            reduce using rule 5 (instruccion -> metodo_con_parametro .)
+
+
+state 6
+
+    (6) declaracion_robot -> ROBOT . ID
+
+    ID              shift and go to state 9
+
+
+state 7
+
+    (7) metodo_sin_parametro -> ID . PUNTO METODO
+    (8) metodo_sin_parametro -> ID . PUNTO METODO PAREN_IZQ PAREN_DER
+    (9) metodo_con_parametro -> ID . PUNTO METODO PAREN_IZQ NUMERO PAREN_DER
+
+    PUNTO           shift and go to state 10
+
+
+state 8
+
+    (2) inicio -> instruccion inicio .
+
+    $end            reduce using rule 2 (inicio -> instruccion inicio .)
+
+
+state 9
+
+    (6) declaracion_robot -> ROBOT ID .
+
+    ROBOT           reduce using rule 6 (declaracion_robot -> ROBOT ID .)
+    ID              reduce using rule 6 (declaracion_robot -> ROBOT ID .)
+    $end            reduce using rule 6 (declaracion_robot -> ROBOT ID .)
+
+
+state 10
+
+    (7) metodo_sin_parametro -> ID PUNTO . METODO
+    (8) metodo_sin_parametro -> ID PUNTO . METODO PAREN_IZQ PAREN_DER
+    (9) metodo_con_parametro -> ID PUNTO . METODO PAREN_IZQ NUMERO PAREN_DER
+
+    METODO          shift and go to state 11
+
+
+state 11
+
+    (7) metodo_sin_parametro -> ID PUNTO METODO .
+    (8) metodo_sin_parametro -> ID PUNTO METODO . PAREN_IZQ PAREN_DER
+    (9) metodo_con_parametro -> ID PUNTO METODO . PAREN_IZQ NUMERO PAREN_DER
+
+    ROBOT           reduce using rule 7 (metodo_sin_parametro -> ID PUNTO METODO .)
+    ID              reduce using rule 7 (metodo_sin_parametro -> ID PUNTO METODO .)
+    $end            reduce using rule 7 (metodo_sin_parametro -> ID PUNTO METODO .)
+    PAREN_IZQ       shift and go to state 12
+
+
+state 12
+
+    (8) metodo_sin_parametro -> ID PUNTO METODO PAREN_IZQ . PAREN_DER
+    (9) metodo_con_parametro -> ID PUNTO METODO PAREN_IZQ . NUMERO PAREN_DER
+
+    PAREN_DER       shift and go to state 13
+    NUMERO          shift and go to state 14
+
+
+state 13
+
+    (8) metodo_sin_parametro -> ID PUNTO METODO PAREN_IZQ PAREN_DER .
+
+    ROBOT           reduce using rule 8 (metodo_sin_parametro -> ID PUNTO METODO PAREN_IZQ PAREN_DER .)
+    ID              reduce using rule 8 (metodo_sin_parametro -> ID PUNTO METODO PAREN_IZQ PAREN_DER .)
+    $end            reduce using rule 8 (metodo_sin_parametro -> ID PUNTO METODO PAREN_IZQ PAREN_DER .)
+
+
+state 14
+
+    (9) metodo_con_parametro -> ID PUNTO METODO PAREN_IZQ NUMERO . PAREN_DER
+
+    PAREN_DER       shift and go to state 15
+
+
+state 15
+
+    (9) metodo_con_parametro -> ID PUNTO METODO PAREN_IZQ NUMERO PAREN_DER .
+
+    ROBOT           reduce using rule 9 (metodo_con_parametro -> ID PUNTO METODO PAREN_IZQ NUMERO PAREN_DER .)
+    ID              reduce using rule 9 (metodo_con_parametro -> ID PUNTO METODO PAREN_IZQ NUMERO PAREN_DER .)
+    $end            reduce using rule 9 (metodo_con_parametro -> ID PUNTO METODO PAREN_IZQ NUMERO PAREN_DER .)
+
+
+
+# parsetab.py
+# This file is automatically generated. Do not edit.
+# pylint: disable=W,C,R
+_tabversion = '3.10'
+
+_lr_method = 'LALR'
+
+_lr_signature = 'ID METODO NUMERO PAREN_DER PAREN_IZQ PUNTO ROBOTinicio : instruccion\n| instruccion inicioinstruccion : declaracion_robot\n| metodo_sin_parametro\n| metodo_con_parametrodeclaracion_robot : ROBOT IDmetodo_sin_parametro : ID PUNTO METODO\n| ID PUNTO METODO PAREN_IZQ PAREN_DERmetodo_con_parametro : ID PUNTO METODO PAREN_IZQ NUMERO PAREN_DER'
+    
+_lr_action_items = {'ROBOT':([0,2,3,4,5,9,11,13,15,],[6,6,-3,-4,-5,-6,-7,-8,-9,]),'ID':([0,2,3,4,5,6,9,11,13,15,],[7,7,-3,-4,-5,9,-6,-7,-8,-9,]),'$end':([1,2,3,4,5,8,9,11,13,15,],[0,-1,-3,-4,-5,-2,-6,-7,-8,-9,]),'PUNTO':([7,],[10,]),'METODO':([10,],[11,]),'PAREN_IZQ':([11,],[12,]),'PAREN_DER':([12,14,],[13,15,]),'NUMERO':([12,],[14,]),}
+
+_lr_action = {}
+for _k, _v in _lr_action_items.items():
+   for _x,_y in zip(_v[0],_v[1]):
+      if not _x in _lr_action:  _lr_action[_x] = {}
+      _lr_action[_x][_k] = _y
+del _lr_action_items
+
+_lr_goto_items = {'inicio':([0,2,],[1,8,]),'instruccion':([0,2,],[2,2,]),'declaracion_robot':([0,2,],[3,3,]),'metodo_sin_parametro':([0,2,],[4,4,]),'metodo_con_parametro':([0,2,],[5,5,]),}
+
+_lr_goto = {}
+for _k, _v in _lr_goto_items.items():
+   for _x, _y in zip(_v[0], _v[1]):
+       if not _x in _lr_goto: _lr_goto[_x] = {}
+       _lr_goto[_x][_k] = _y
+del _lr_goto_items
+_lr_productions = [
+  ("S' -> inicio","S'",1,None,None,None),
+  ('inicio -> instruccion','inicio',1,'p_inicio','robotcodig.py',75),
+  ('inicio -> instruccion inicio','inicio',2,'p_inicio','robotcodig.py',76),
+  ('instruccion -> declaracion_robot','instruccion',1,'p_instruccion','robotcodig.py',80),
+  ('instruccion -> metodo_sin_parametro','instruccion',1,'p_instruccion','robotcodig.py',81),
+  ('instruccion -> metodo_con_parametro','instruccion',1,'p_instruccion','robotcodig.py',82),
+  ('declaracion_robot -> ROBOT ID','declaracion_robot',2,'p_declaracion_robot','robotcodig.py',86),
+  ('metodo_sin_parametro -> ID PUNTO METODO','metodo_sin_parametro',3,'p_metodo_sin_parametro','robotcodig.py',97),
+  ('metodo_sin_parametro -> ID PUNTO METODO PAREN_IZQ PAREN_DER','metodo_sin_parametro',5,'p_metodo_sin_parametro','robotcodig.py',98),
+  ('metodo_con_parametro -> ID PUNTO METODO PAREN_IZQ NUMERO PAREN_DER','metodo_con_parametro',6,'p_metodo_con_parametro','robotcodig.py',119),
+]
+
