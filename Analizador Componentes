@@ -766,5 +766,33 @@ public class Principal {
 }
 
 
+/*
+ * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
+ * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
+ */
+package codigo;
+
+/**
+ *
+ * @author Victor
+ */
+public class TokenInfo {
+    String token;
+    String tipo;
+    String valor;
+    String parametro;
+
+    public TokenInfo(String token, String tipo, String valor, String parametro) {
+        this.token = token;
+        this.tipo = tipo;
+        this.valor = valor;
+        this.parametro = parametro;
+    }
+
+    public String[] toArray() {
+        return new String[]{token, tipo, valor, parametro};
+    }
+}
+
 
 
