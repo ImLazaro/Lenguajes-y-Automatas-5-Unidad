@@ -796,3 +796,38 @@ public class TokenInfo {
 
 
 
+/*
+ * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
+ * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Enum.java to edit this template
+ */
+package codigo;
+
+/**
+ *
+ * @author Victor 
+ */
+public enum Tokens {
+    ERROR,
+    Desconocido,
+    // Palabras reservadas
+    Robot,
+    Iniciar,
+    Finalizar,
+    Repetir,
+
+    // Identificadores y literales
+    Identificador,
+    Numero,
+
+    // Métodos
+    Metodo,
+
+    // Acciones específicas
+    Accion,
+    AbrirGarra,
+    CerrarGarra,
+
+   
+    Simbolo,
+    Operador
+}
